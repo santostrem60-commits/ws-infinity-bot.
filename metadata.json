@@ -1,0 +1,6 @@
+{
+  "name": "WS Infinity Bot",
+  "description": "Plataforma oficial de automação de operações de trading e videoaulas WS Infinity Bot - Will Santos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
