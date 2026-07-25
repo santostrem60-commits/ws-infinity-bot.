@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { NavSection } from '../types';
 import { WSLogo } from './WSLogo';
-import { PlayCircle, Cpu, HelpCircle, User, Home, Menu, X, ShieldCheck } from 'lucide-react';
+import { PlayCircle, Cpu, Home, Menu, X } from 'lucide-react';
 
 interface NavbarProps {
   activeTab: NavSection;
@@ -13,8 +13,6 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
-  isConnected,
-  balance,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -22,8 +20,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'inicio', label: 'Início', icon: <Home className="w-4 h-4" /> },
     { id: 'aulas', label: 'Vídeo Aulas', icon: <PlayCircle className="w-4 h-4" /> },
     { id: 'plataforma', label: 'Plataforma', icon: <Cpu className="w-4 h-4" /> },
-    { id: 'suporte', label: 'Suporte', icon: <HelpCircle className="w-4 h-4" /> },
-    { id: 'conta', label: 'Minha Conta', icon: <User className="w-4 h-4" /> },
   ];
 
   const handleNavClick = (id: NavSection) => {
@@ -72,25 +68,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           })}
         </nav>
 
-        {/* Right Status Badge & Quick Balance */}
-        <div className="hidden sm:flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/80 border border-slate-800 text-xs font-mono">
-            <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-            <span className="text-slate-300 font-medium">
-              {isConnected ? 'API Conectada' : 'API Off'}
-            </span>
-          </div>
-
-          <button
-            onClick={() => handleNavClick('plataforma')}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-950/60 border border-blue-800/60 hover:border-blue-500 text-blue-200 text-sm font-semibold transition-all hover:bg-blue-900/40"
-            id="nav-quick-balance-btn"
-          >
-            <ShieldCheck className="w-4 h-4 text-cyan-400" />
-            <span>${balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-          </button>
-        </div>
-
         {/* Mobile Hamburger Toggle */}
         <div className="lg:hidden flex items-center gap-2">
           <button
@@ -107,16 +84,6 @@ export const Navbar: React.FC<NavbarProps> = ({
       {/* Mobile Menu Drawer */}
       {mobileMenuOpen && (
         <div className="lg:hidden bg-[#0a0f24] border-b border-slate-800 px-4 pt-3 pb-6 space-y-2 animate-in slide-in-from-top duration-200">
-          <div className="flex items-center justify-between p-3 mb-2 rounded-lg bg-slate-900/90 border border-slate-800">
-            <div className="flex items-center gap-2 text-xs text-slate-300">
-              <span className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-              <span>Status Deriv API: {isConnected ? 'Ativo' : 'Desconectado'}</span>
-            </div>
-            <span className="text-xs font-mono text-cyan-400 font-bold">
-              Banca: ${balance.toFixed(2)}
-            </span>
-          </div>
-
           {navItems.map((item) => {
             const isActive = activeTab === item.id;
             return (

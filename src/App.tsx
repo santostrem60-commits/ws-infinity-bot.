@@ -134,19 +134,13 @@ export default function App() {
           <Plataforma
             account={account}
             setAccount={setAccount}
-            onNavigateToAccount={() => setActiveTab('minha-conta')}
+            onNavigateToAccount={() => setActiveTab('inicio')}
           />
         )}
 
         {activeTab === 'aulas' && (
           <VideoAulas initialLesson={selectedTutorialLesson} />
         )}
-
-        {activeTab === 'minha-conta' && (
-          <MinhaContaSection account={account} setAccount={setAccount} />
-        )}
-
-        {activeTab === 'suporte' && <SuporteSection />}
 
         {activeTab === 'faq' && <FAQSection />}
       </main>
