@@ -1,23 +1,22 @@
-import { get, set } from 'idb-keyval';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  query, 
+  orderBy,
+  getDocs
+} from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { OperationResultPrint } from '../types';
 
-const STORAGE_KEY = 'ws_infinity_results_idb_v1';
-const CHANNEL_NAME = 'ws_infinity_results_channel';
+const RESULTS_COLLECTION = 'results';
 
-// Create broadcast channel for tab synchronization
-let channel: BroadcastChannel | null = null;
-if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-  try {
-    channel = new BroadcastChannel(CHANNEL_NAME);
-  } catch (e) {
-    console.error('BroadcastChannel not supported:', e);
-  }
-}
-
-// Image compression helper using HTML Canvas
-export async function compressImage(dataUrl: string, maxWidth = 1600, quality = 0.85): Promise<string> {
-  // If it's already a tiny string or SVG/asset path, return as is
-  if (!dataUrl.startsWith('data:image')) {
+// Image compression helper using HTML Canvas to keep size under Firestore document limit (~1MB)
+export async function compressImage(dataUrl: string, maxWidth = 1200, quality = 0.80): Promise<string> {
+  // If it's not a data URL (e.g. asset URL), return unchanged
+  if (!dataUrl || !dataUrl.startsWith('data:image')) {
     return dataUrl;
   }
 
@@ -44,7 +43,7 @@ export async function compressImage(dataUrl: string, maxWidth = 1600, quality = 
       }
 
       ctx.drawImage(img, 0, 0, width, height);
-      // Convert to JPEG with quality compression
+      // Convert to compressed JPEG string
       const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
       resolve(compressedDataUrl);
     };
@@ -53,76 +52,114 @@ export async function compressImage(dataUrl: string, maxWidth = 1600, quality = 
   });
 }
 
-// Fetch results from IndexedDB (or fallback to LocalStorage/Default)
+// Fetch results directly from Firestore
 export async function loadResultsFromStorage(defaultResults: OperationResultPrint[]): Promise<OperationResultPrint[]> {
   try {
-    const stored = await get<OperationResultPrint[]>(STORAGE_KEY);
-    if (stored && Array.isArray(stored) && stored.length > 0) {
-      return stored;
-    }
+    const resultsRef = collection(db, RESULTS_COLLECTION);
+    const q = query(resultsRef, orderBy('createdAt', 'desc'));
+    const snapshot = await getDocs(q);
 
-    // Check legacy localStorage fallback
-    const legacy = localStorage.getItem('ws_infinity_results_v1');
-    if (legacy) {
-      const parsed = JSON.parse(legacy);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        await set(STORAGE_KEY, parsed);
-        return parsed;
+    if (!snapshot.empty) {
+      const docsData: OperationResultPrint[] = snapshot.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          title: data.title || '',
+          date: data.date || '',
+          profit: Number(data.profit) || 0,
+          winRate: data.winRate || '',
+          botName: data.botName || '',
+          description: data.description || '',
+          imageUrl: data.imageUrl || '',
+          createdAt: Number(data.createdAt) || Date.now(),
+        };
+      });
+      return docsData;
+    } else {
+      // Seed default initial results to Firestore if DB is empty
+      for (const item of defaultResults) {
+        await setDoc(doc(db, RESULTS_COLLECTION, item.id), item);
       }
+      return defaultResults;
     }
   } catch (err) {
-    console.error('Error loading from IndexedDB:', err);
+    console.error('Erro ao carregar resultados do Firestore:', err);
+    return defaultResults;
   }
-
-  return defaultResults;
 }
 
-// Save results to IndexedDB and notify other tabs
-export async function saveResultsToStorage(results: OperationResultPrint[]): Promise<void> {
+// Save a single result item (Add or Edit) to Firestore
+export async function saveSingleResultToCloud(resultItem: OperationResultPrint): Promise<void> {
   try {
-    await set(STORAGE_KEY, results);
-    
-    // Backup small metadata to localStorage if possible
-    try {
-      localStorage.setItem('ws_infinity_results_v1', JSON.stringify(results.map(r => ({
-        ...r,
-        imageUrl: r.imageUrl.length > 500000 ? 'idb' : r.imageUrl
-      }))));
-    } catch (_) {
-      // Ignore quota error for localStorage backup
-    }
-
-    // Broadcast change to other open tabs/windows
-    if (channel) {
-      channel.postMessage({ type: 'RESULTS_UPDATED' });
-    }
+    const docRef = doc(db, RESULTS_COLLECTION, resultItem.id);
+    await setDoc(docRef, {
+      id: resultItem.id,
+      title: resultItem.title,
+      date: resultItem.date,
+      profit: Number(resultItem.profit) || 0,
+      winRate: resultItem.winRate || '95%',
+      botName: resultItem.botName || 'WS Infinity Bot',
+      description: resultItem.description || '',
+      imageUrl: resultItem.imageUrl,
+      createdAt: Number(resultItem.createdAt) || Date.now(),
+    });
   } catch (err) {
-    console.error('Error saving to IndexedDB:', err);
+    console.error('Erro ao salvar no Firestore:', err);
+    throw err;
   }
 }
 
-// Listen for updates from other tabs
-export function subscribeToStorageUpdates(onUpdate: () => void): () => void {
-  if (!channel && typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-    try {
-      channel = new BroadcastChannel(CHANNEL_NAME);
-    } catch (e) {
-      console.error(e);
-    }
+// Delete a result item from Firestore
+export async function deleteResultFromCloud(id: string): Promise<void> {
+  try {
+    const docRef = doc(db, RESULTS_COLLECTION, id);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.error('Erro ao deletar no Firestore:', err);
+    throw err;
   }
+}
 
-  if (channel) {
-    const handler = (event: MessageEvent) => {
-      if (event.data?.type === 'RESULTS_UPDATED') {
-        onUpdate();
+// Subscribe to REAL-TIME updates from Firestore for all clients
+export function subscribeToCloudResults(
+  onUpdate: (data: OperationResultPrint[]) => void,
+  fallbackDefaults: OperationResultPrint[]
+): () => void {
+  try {
+    const resultsRef = collection(db, RESULTS_COLLECTION);
+    const q = query(resultsRef, orderBy('createdAt', 'desc'));
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const items: OperationResultPrint[] = snapshot.docs.map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              title: data.title || '',
+              date: data.date || '',
+              profit: Number(data.profit) || 0,
+              winRate: data.winRate || '',
+              botName: data.botName || '',
+              description: data.description || '',
+              imageUrl: data.imageUrl || '',
+              createdAt: Number(data.createdAt) || Date.now(),
+            };
+          });
+          onUpdate(items);
+        } else {
+          onUpdate(fallbackDefaults);
+        }
+      },
+      (error) => {
+        console.error('Firestore listener error:', error);
       }
-    };
-    channel.addEventListener('message', handler);
+    );
 
-    return () => {
-      channel?.removeEventListener('message', handler);
-    };
+    return unsubscribe;
+  } catch (e) {
+    console.error('Erro ao inscrever no Firestore:', e);
+    return () => {};
   }
-
-  return () => {};
 }

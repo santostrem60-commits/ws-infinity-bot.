@@ -23,8 +23,9 @@ import {
 import bgLogo from '../assets/images/will_santos_logo_1785014356765.jpg';
 import { 
   loadResultsFromStorage, 
-  saveResultsToStorage, 
-  subscribeToStorageUpdates, 
+  saveSingleResultToCloud, 
+  deleteResultFromCloud, 
+  subscribeToCloudResults, 
   compressImage 
 } from '../utils/storage';
 
@@ -99,30 +100,26 @@ export const ResultadosSection: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [filterType, setFilterType] = useState<'all' | 'highest' | 'recent'>('recent');
 
-  // Load results from IndexedDB on mount
-  const refreshFromStorage = useCallback(async () => {
-    try {
-      const data = await loadResultsFromStorage(INITIAL_RESULTS);
-      setResults(data);
-    } catch (e) {
-      console.error('Erro ao carregar do storage:', e);
-    } finally {
-      setIsLoadingStorage(false);
-    }
-  }, []);
-
+  // Load results from Firestore and set up Real-Time subscription
   useEffect(() => {
-    refreshFromStorage();
+    setIsLoadingStorage(true);
 
-    // Subscribe to changes broadcast from other tabs
-    const unsubscribe = subscribeToStorageUpdates(() => {
-      refreshFromStorage();
+    // Initial load check
+    loadResultsFromStorage(INITIAL_RESULTS).then((data) => {
+      setResults(data);
+      setIsLoadingStorage(false);
     });
+
+    // Real-time listener: updates automatically across all devices & browsers
+    const unsubscribe = subscribeToCloudResults((cloudItems) => {
+      setResults(cloudItems);
+      setIsLoadingStorage(false);
+    }, INITIAL_RESULTS);
 
     return () => {
       unsubscribe();
     };
-  }, [refreshFromStorage]);
+  }, []);
 
   // Handle Admin Unlock
   const handleUnlockAdmin = (e: React.FormEvent) => {
@@ -167,9 +164,12 @@ export const ResultadosSection: React.FC = () => {
   // Delete Result
   const handleDelete = async (id: string) => {
     if (window.confirm('Tem certeza que deseja excluir este resultado da galeria?')) {
-      const updated = results.filter((r) => r.id !== id);
-      setResults(updated);
-      await saveResultsToStorage(updated);
+      try {
+        await deleteResultFromCloud(id);
+      } catch (err) {
+        console.error('Erro ao excluir:', err);
+        alert('Erro ao excluir do servidor.');
+      }
     }
   };
 
@@ -188,8 +188,8 @@ export const ResultadosSection: React.FC = () => {
       reader.onloadend = async () => {
         if (typeof reader.result === 'string') {
           try {
-            // Compress image to fast lightweight JPEG string
-            const compressed = await compressImage(reader.result, 1600, 0.85);
+            // Compress image to fast lightweight JPEG string suitable for Firestore (~100-300KB)
+            const compressed = await compressImage(reader.result, 1200, 0.80);
             setFormImageUrl(compressed);
           } catch (err) {
             console.error('Erro na compressão:', err);
@@ -221,46 +221,25 @@ export const ResultadosSection: React.FC = () => {
       const numericProfit = parseFloat(formProfit) || 0;
       const finalImageUrl = formImageUrl || bgLogo;
 
-      let updatedList: OperationResultPrint[];
+      const itemToSave: OperationResultPrint = {
+        id: editingId || `res-${Date.now()}`,
+        title: formTitle,
+        date: formDate,
+        profit: numericProfit,
+        winRate: formWinRate,
+        botName: formBotName,
+        description: formDescription,
+        imageUrl: finalImageUrl,
+        createdAt: editingId 
+          ? (results.find(r => r.id === editingId)?.createdAt || Date.now()) 
+          : Date.now(),
+      };
 
-      if (editingId) {
-        // Edit mode
-        updatedList = results.map((item) =>
-          item.id === editingId
-            ? {
-                ...item,
-                title: formTitle,
-                profit: numericProfit,
-                winRate: formWinRate,
-                botName: formBotName,
-                description: formDescription,
-                date: formDate,
-                imageUrl: finalImageUrl,
-              }
-            : item
-        );
-      } else {
-        // Add new mode
-        const newItem: OperationResultPrint = {
-          id: `res-${Date.now()}`,
-          title: formTitle,
-          date: formDate,
-          profit: numericProfit,
-          winRate: formWinRate,
-          botName: formBotName,
-          description: formDescription,
-          imageUrl: finalImageUrl,
-          createdAt: Date.now(),
-        };
-        updatedList = [newItem, ...results];
-      }
-
-      setResults(updatedList);
-      await saveResultsToStorage(updatedList);
+      await saveSingleResultToCloud(itemToSave);
       setShowFormModal(false);
     } catch (e) {
-      console.error('Erro ao salvar resultado:', e);
-      alert('Ocorreu um erro ao salvar o print. Tente novamente.');
+      console.error('Erro ao salvar resultado no Firestore:', e);
+      alert('Ocorreu um erro ao salvar o print na nuvem. Tente novamente.');
     } finally {
       setIsSaving(false);
     }

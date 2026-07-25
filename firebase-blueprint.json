@@ -1,0 +1,19 @@
+{
+  "entities": {
+    "results": {
+      "title": "Operation Results",
+      "description": "Prints and operation results uploaded by admin for clients to view",
+      "properties": {
+        "title": { "type": "string", "description": "Title of the operation" },
+        "date": { "type": "string", "description": "Formatted date string" },
+        "profit": { "type": "number", "description": "Profit amount in USD" },
+        "winRate": { "type": "string", "description": "Win rate percentage" },
+        "botName": { "type": "string", "description": "Name of the bot used" },
+        "description": { "type": "string", "description": "Detailed description" },
+        "imageUrl": { "type": "string", "description": "Image data URL or asset path" },
+        "createdAt": { "type": "number", "description": "Timestamp in milliseconds" }
+      },
+      "required": ["title", "date", "profit", "imageUrl", "createdAt"]
+    }
+  }
+}
