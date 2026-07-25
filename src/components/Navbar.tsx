@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { NavSection } from '../types';
 import { WSLogo } from './WSLogo';
-import { PlayCircle, Cpu, Home, Menu, X } from 'lucide-react';
+import { PlayCircle, Cpu, Home, TrendingUp, Menu, X } from 'lucide-react';
 
 interface NavbarProps {
   activeTab: NavSection;
@@ -20,6 +20,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'inicio', label: 'Início', icon: <Home className="w-4 h-4" /> },
     { id: 'aulas', label: 'Vídeo Aulas', icon: <PlayCircle className="w-4 h-4" /> },
     { id: 'plataforma', label: 'Plataforma', icon: <Cpu className="w-4 h-4" /> },
+    { id: 'resultados', label: 'Resultados', icon: <TrendingUp className="w-4 h-4" /> },
   ];
 
   const handleNavClick = (id: NavSection) => {

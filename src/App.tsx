@@ -4,6 +4,7 @@ import { Navbar } from './components/Navbar';
 import { HeroBanner } from './components/HeroBanner';
 import { VideoAulas } from './components/VideoAulas';
 import { Plataforma } from './components/Plataforma';
+import { ResultadosSection } from './components/ResultadosSection';
 import { FAQSection } from './components/FAQSection';
 import { SuporteSection } from './components/SuporteSection';
 import { MinhaContaSection } from './components/MinhaContaSection';
@@ -140,6 +141,10 @@ export default function App() {
 
         {activeTab === 'aulas' && (
           <VideoAulas initialLesson={selectedTutorialLesson} />
+        )}
+
+        {activeTab === 'resultados' && (
+          <ResultadosSection />
         )}
 
         {activeTab === 'faq' && <FAQSection />}

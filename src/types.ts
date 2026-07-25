@@ -1,4 +1,16 @@
-export type NavSection = 'inicio' | 'aulas' | 'plataforma' | 'suporte' | 'conta';
+export type NavSection = 'inicio' | 'aulas' | 'plataforma' | 'resultados' | 'suporte' | 'conta';
+
+export interface OperationResultPrint {
+  id: string;
+  title: string;
+  date: string;
+  profit: number;
+  winRate?: string;
+  botName?: string;
+  description?: string;
+  imageUrl: string;
+  createdAt: number;
+}
 
 export interface VideoLesson {
   id: number;

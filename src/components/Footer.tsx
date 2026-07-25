@@ -47,6 +47,11 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   • Plataforma
                 </button>
               </li>
+              <li>
+                <button onClick={() => onNavigate('resultados')} className="hover:text-blue-400 transition-colors" id="footer-link-resultados">
+                  • Resultados
+                </button>
+              </li>
             </ul>
           </div>
 
