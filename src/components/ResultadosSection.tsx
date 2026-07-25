@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { OperationResultPrint } from '../types';
 import { 
   TrendingUp, 
@@ -18,11 +18,17 @@ import {
   Sparkles,
   Eye,
   Search,
-  Filter
+  Loader2
 } from 'lucide-react';
 import bgLogo from '../assets/images/will_santos_logo_1785014356765.jpg';
+import { 
+  loadResultsFromStorage, 
+  saveResultsToStorage, 
+  subscribeToStorageUpdates, 
+  compressImage 
+} from '../utils/storage';
 
-// Initial default sample operations if localStorage is empty
+// Initial default sample operations if storage is empty
 const INITIAL_RESULTS: OperationResultPrint[] = [
   {
     id: 'res-1',
@@ -60,19 +66,10 @@ const INITIAL_RESULTS: OperationResultPrint[] = [
 ];
 
 export const ResultadosSection: React.FC = () => {
-  // Persistence in LocalStorage
-  const [results, setResults] = useState<OperationResultPrint[]>(() => {
-    try {
-      const saved = localStorage.getItem('ws_infinity_results_v1');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.error('Erro ao carregar resultados:', e);
-    }
-    return INITIAL_RESULTS;
-  });
+  const [results, setResults] = useState<OperationResultPrint[]>(INITIAL_RESULTS);
+  const [isLoadingStorage, setIsLoadingStorage] = useState<boolean>(true);
+  const [isProcessingImage, setIsProcessingImage] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
   // Admin state
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
@@ -102,26 +99,42 @@ export const ResultadosSection: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [filterType, setFilterType] = useState<'all' | 'highest' | 'recent'>('recent');
 
-  // Save to LocalStorage whenever results change
-  useEffect(() => {
+  // Load results from IndexedDB on mount
+  const refreshFromStorage = useCallback(async () => {
     try {
-      localStorage.setItem('ws_infinity_results_v1', JSON.stringify(results));
+      const data = await loadResultsFromStorage(INITIAL_RESULTS);
+      setResults(data);
     } catch (e) {
-      console.error('Erro ao salvar no localStorage:', e);
+      console.error('Erro ao carregar do storage:', e);
+    } finally {
+      setIsLoadingStorage(false);
     }
-  }, [results]);
+  }, []);
+
+  useEffect(() => {
+    refreshFromStorage();
+
+    // Subscribe to changes broadcast from other tabs
+    const unsubscribe = subscribeToStorageUpdates(() => {
+      refreshFromStorage();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [refreshFromStorage]);
 
   // Handle Admin Unlock
   const handleUnlockAdmin = (e: React.FormEvent) => {
     e.preventDefault();
-    // Default admin password is 'will123' or 'admin'
-    if (adminPasswordInput.trim() === 'will123' || adminPasswordInput.trim() === 'admin' || adminPasswordInput.trim() === '123456') {
+    const cleanInput = adminPasswordInput.trim();
+    if (cleanInput === 'will123' || cleanInput === 'admin' || cleanInput === '123456') {
       setIsAdmin(true);
       setShowAdminModal(false);
       setAdminPasswordInput('');
       setAdminError('');
     } else {
-      setAdminError('Senha incorreta! (Dica: a senha padrão do admin é: will123)');
+      setAdminError('Senha de administrador incorreta.');
     }
   };
 
@@ -152,9 +165,11 @@ export const ResultadosSection: React.FC = () => {
   };
 
   // Delete Result
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('Tem certeza que deseja excluir este resultado da galeria?')) {
-      setResults((prev) => prev.filter((r) => r.id !== id));
+      const updated = results.filter((r) => r.id !== id);
+      setResults(updated);
+      await saveResultsToStorage(updated);
     }
   };
 
@@ -162,22 +177,37 @@ export const ResultadosSection: React.FC = () => {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 8 * 1024 * 1024) {
-        alert('A imagem é muito grande. Escolha uma imagem de até 8MB.');
+      if (file.size > 15 * 1024 * 1024) {
+        alert('A imagem é muito grande. Escolha uma imagem de até 15MB.');
         return;
       }
+
+      setIsProcessingImage(true);
       const reader = new FileReader();
-      reader.onloadend = () => {
+
+      reader.onloadend = async () => {
         if (typeof reader.result === 'string') {
-          setFormImageUrl(reader.result);
+          try {
+            // Compress image to fast lightweight JPEG string
+            const compressed = await compressImage(reader.result, 1600, 0.85);
+            setFormImageUrl(compressed);
+          } catch (err) {
+            console.error('Erro na compressão:', err);
+            setFormImageUrl(reader.result);
+          } finally {
+            setIsProcessingImage(false);
+          }
+        } else {
+          setIsProcessingImage(false);
         }
       };
+
       reader.readAsDataURL(file);
     }
   };
 
   // Save Form (Add or Edit)
-  const handleSaveResult = (e: React.FormEvent) => {
+  const handleSaveResult = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formTitle.trim()) {
@@ -185,13 +215,17 @@ export const ResultadosSection: React.FC = () => {
       return;
     }
 
-    const numericProfit = parseFloat(formProfit) || 0;
-    const finalImageUrl = formImageUrl || bgLogo;
+    setIsSaving(true);
 
-    if (editingId) {
-      // Edit mode
-      setResults((prev) =>
-        prev.map((item) =>
+    try {
+      const numericProfit = parseFloat(formProfit) || 0;
+      const finalImageUrl = formImageUrl || bgLogo;
+
+      let updatedList: OperationResultPrint[];
+
+      if (editingId) {
+        // Edit mode
+        updatedList = results.map((item) =>
           item.id === editingId
             ? {
                 ...item,
@@ -204,25 +238,32 @@ export const ResultadosSection: React.FC = () => {
                 imageUrl: finalImageUrl,
               }
             : item
-        )
-      );
-    } else {
-      // Add new mode
-      const newItem: OperationResultPrint = {
-        id: `res-${Date.now()}`,
-        title: formTitle,
-        date: formDate,
-        profit: numericProfit,
-        winRate: formWinRate,
-        botName: formBotName,
-        description: formDescription,
-        imageUrl: finalImageUrl,
-        createdAt: Date.now(),
-      };
-      setResults((prev) => [newItem, ...prev]);
-    }
+        );
+      } else {
+        // Add new mode
+        const newItem: OperationResultPrint = {
+          id: `res-${Date.now()}`,
+          title: formTitle,
+          date: formDate,
+          profit: numericProfit,
+          winRate: formWinRate,
+          botName: formBotName,
+          description: formDescription,
+          imageUrl: finalImageUrl,
+          createdAt: Date.now(),
+        };
+        updatedList = [newItem, ...results];
+      }
 
-    setShowFormModal(false);
+      setResults(updatedList);
+      await saveResultsToStorage(updatedList);
+      setShowFormModal(false);
+    } catch (e) {
+      console.error('Erro ao salvar resultado:', e);
+      alert('Ocorreu um erro ao salvar o print. Tente novamente.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Calculated Stats
@@ -264,7 +305,7 @@ export const ResultadosSection: React.FC = () => {
           </p>
         </div>
 
-        {/* Right Admin Controls Toggle */}
+        {/* Right Admin Controls Toggle - Discreet for Owner Only */}
         <div className="z-10 flex flex-col sm:flex-row items-center gap-3">
           {isAdmin ? (
             <div className="flex items-center gap-2">
@@ -287,13 +328,14 @@ export const ResultadosSection: React.FC = () => {
               </button>
             </div>
           ) : (
+            /* Subtle discreet lock icon only visible for the owner */
             <button
               onClick={() => setShowAdminModal(true)}
-              className="px-5 py-3 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700 text-xs sm:text-sm font-bold flex items-center gap-2 transition-all shadow-lg"
+              className="p-2 rounded-xl bg-slate-950/40 hover:bg-slate-900 text-slate-600 hover:text-slate-400 border border-slate-800/50 text-xs transition-colors"
+              title="Acesso do Administrador"
               id="admin-login-toggle-btn"
             >
-              <Lock className="w-4 h-4 text-blue-400" />
-              <span>Área do Administrador</span>
+              <Lock className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
@@ -380,8 +422,13 @@ export const ResultadosSection: React.FC = () => {
         </div>
       </div>
 
-      {/* Results Cards Grid */}
-      {filteredResults.length === 0 ? (
+      {/* Loading state indicator */}
+      {isLoadingStorage ? (
+        <div className="p-12 text-center rounded-2xl bg-slate-900/40 border border-slate-800 flex flex-col items-center justify-center gap-3 text-slate-400">
+          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+          <p className="text-xs">Carregando prints salvos...</p>
+        </div>
+      ) : filteredResults.length === 0 ? (
         <div className="p-12 text-center rounded-2xl bg-slate-900/40 border border-slate-800 space-y-3">
           <p className="text-slate-400 text-sm">Nenhum resultado encontrado.</p>
           {isAdmin && (
@@ -527,9 +574,6 @@ export const ResultadosSection: React.FC = () => {
                   className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500"
                   autoFocus
                 />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Dica de senha: <code className="text-cyan-400">will123</code>
-                </p>
               </div>
 
               {adminError && (
@@ -602,12 +646,18 @@ export const ResultadosSection: React.FC = () => {
                     htmlFor="file-upload-input"
                     className="cursor-pointer flex flex-col items-center gap-2"
                   >
-                    <Upload className="w-8 h-8 text-blue-400" />
+                    {isProcessingImage ? (
+                      <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+                    ) : (
+                      <Upload className="w-8 h-8 text-blue-400" />
+                    )}
                     <span className="text-xs font-semibold text-slate-300">
-                      Clique aqui para selecionar o print do seu computador
+                      {isProcessingImage
+                        ? 'Otimizando e processando print...'
+                        : 'Clique aqui para selecionar o print do seu computador'}
                     </span>
                     <span className="text-[11px] text-slate-500">
-                      Formatos suportados: PNG, JPG, WEBP (até 8MB)
+                      Formatos suportados: PNG, JPG, WEBP (Otimização automática ativada)
                     </span>
                   </label>
                 </div>
@@ -729,9 +779,11 @@ export const ResultadosSection: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs shadow-lg shadow-emerald-500/20"
+                  disabled={isSaving || isProcessingImage}
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 text-slate-950 font-black text-xs shadow-lg shadow-emerald-500/20 flex items-center gap-2"
                 >
-                  {editingId ? 'Salvar Alterações' : 'Publicar Resultado'}
+                  {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{editingId ? 'Salvar Alterações' : 'Publicar Resultado'}</span>
                 </button>
               </div>
             </form>
